@@ -48,7 +48,7 @@
     "url": "git+https://github.com/wexiohub/tiptap-model-language.git"
   },
   "bugs": { "url": "https://github.com/wexiohub/tiptap-model-language/issues" },
-  "homepage": "https://model-language.wexio.io",
+  "homepage": "https://ml.wexio.io",
   "publishConfig": { "access": "public" },
   "pnpm": { "onlyBuiltDependencies": ["esbuild"] },
   "peerDependencies": {

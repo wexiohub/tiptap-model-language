@@ -16,7 +16,7 @@ highlighting, staged type-aware autocomplete (variables, filters, control
 blocks), hover diagnostics with one-click quick-fixes, and live validation that
 runs fully in-process, with no server round-trip.
 
-**Live demo and docs:** [model-language.wexio.io](https://model-language.wexio.io)
+**Live demo and docs:** [ml.wexio.io](https://ml.wexio.io)
 
 ## Installation
 
@@ -108,7 +108,7 @@ are usually needed.
 | `translateDiagnostic` | `(d) => string \| undefined` | `undefined` | Localize an engine diagnostic by its stable code. |
 | `onResult` | `(result) => void` | `undefined` | Full result hook (diagnostics + token estimate). |
 
-Full reference: [model-language.wexio.io/docs](https://model-language.wexio.io/docs).
+Full reference: [ml.wexio.io/docs](https://ml.wexio.io/docs).
 
 ## The engine, re-exported
 
@@ -136,7 +136,7 @@ pnpm build         # tsup -> dist (ESM + CJS + .d.ts)
 ```
 
 The landing page and end-to-end (Playwright) suite live in the separate
-[demo repository](https://model-language.wexio.io).
+[demo repository](https://ml.wexio.io).
 
 ## License
 
