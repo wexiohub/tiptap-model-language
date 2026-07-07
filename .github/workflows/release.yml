@@ -1,0 +1,43 @@
+name: Release
+
+# Push a tag `vX.Y.Z` to publish that version to npm. The tag is the single
+# source of truth: its version is stamped into package.json before publishing.
+# Requires an NPM_TOKEN secret (Settings -> Secrets -> Actions).
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version from tag & stamp the manifest
+        run: |
+          V="${GITHUB_REF_NAME#v}"           # v1.2.3 -> 1.2.3
+          echo "Releasing version $V to npm"
+          node -e "const f='package.json',p=require('./'+f);p.version='$V';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: pnpm install
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

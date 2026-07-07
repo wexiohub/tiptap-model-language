@@ -1,0 +1,84 @@
+{
+  "name": "tiptap-model-language",
+  "version": "1.0.0",
+  "description": "A Tiptap extension for the model-language template syntax: raw-text {{…}} highlighting, staged type-aware autocomplete (variables, filters, control blocks), hover diagnostics and local validation via the model-language engine.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "engines": { "node": ">=18" },
+  "packageManager": "pnpm@10.13.1",
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "pnpm build",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:cov": "vitest run --coverage",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write ."
+  },
+  "keywords": [
+    "tiptap",
+    "prosemirror",
+    "model-language",
+    "template",
+    "template-editor",
+    "prompt",
+    "prompt-editor",
+    "editor",
+    "autocomplete",
+    "validation",
+    "syntax-highlighting"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wexiohub/tiptap-model-language.git"
+  },
+  "bugs": { "url": "https://github.com/wexiohub/tiptap-model-language/issues" },
+  "homepage": "https://model-language.wexio.io",
+  "publishConfig": { "access": "public" },
+  "pnpm": { "onlyBuiltDependencies": ["esbuild"] },
+  "peerDependencies": {
+    "@tiptap/core": "^3",
+    "@tiptap/pm": "^3",
+    "@tiptap/react": "^3",
+    "@tiptap/suggestion": "^3",
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "dependencies": {
+    "clsx": "^2",
+    "date-fns": "^4",
+    "model-language": "^1",
+    "tailwind-merge": "^3",
+    "tippy.js": "^6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.2",
+    "@tiptap/core": "^3.23.4",
+    "@tiptap/pm": "^3.23.4",
+    "@tiptap/react": "^3.23.4",
+    "@tiptap/suggestion": "^3.23.4",
+    "@types/node": "^20.19.24",
+    "@types/react": "^19.2.2",
+    "@vitest/coverage-v8": "^4.1.10",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.10"
+  }
+}
