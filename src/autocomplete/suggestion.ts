@@ -70,7 +70,14 @@ export function createSuggestionPlugin(deps: {
 
     items: ({ query }) => {
       const st = key.getState(editor.state);
-      return capOptions(buildModelOptions(st?.namespaces ?? [], query));
+      return capOptions(
+        buildModelOptions(
+          st?.namespaces ?? [],
+          query,
+          st?.directives ?? [],
+          st?.directiveArgLabel,
+        ),
+      );
     },
 
     command: ({ editor, range, props }) => {

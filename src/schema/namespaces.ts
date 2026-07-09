@@ -293,10 +293,20 @@ function splitPipes(inner: string): string[] {
   return out;
 }
 
-/** Parse a token's inner text (no braces) into path + filters. */
-export function parseModelToken(inner: string): ParsedToken {
+/** Parse a token's inner text (no braces) into path + filters. When
+ *  `directives` is given, an inline-directive head (`name: …` where `name` is a
+ *  known directive) is also classified as a directive, so it isn't treated as a
+ *  value path. */
+export function parseModelToken(
+  inner: string,
+  directives?: Set<string>,
+): ParsedToken {
   const trimmed = inner.trim();
-  const directive = DIRECTIVE_RE.test(trimmed);
+  let directive = DIRECTIVE_RE.test(trimmed);
+  if (!directive && directives?.size) {
+    const head = trimmed.match(/^([A-Za-z_]\w*)\s*:/);
+    if (head && directives.has(head[1])) directive = true;
+  }
   const parts = splitPipes(inner);
   const path = (parts[0] ?? "").trim();
   const dot = path.indexOf(".");

@@ -1,6 +1,66 @@
+import type { Diagnostic, DirectiveSpec } from "model-language";
 import { SEV_RANK } from "../core/constants";
-import type { TemplateDiagnostic, TokenDiagnostic } from "../core/types";
+import type {
+  RangeDiagnostic,
+  TemplateDiagnostic,
+  TokenDiagnostic,
+} from "../core/types";
 import type { MlField } from "../schema/namespaces";
+
+/** Engine diagnostics that carry no `fieldPath` but are rendered elsewhere, so
+ *  they must NOT be turned into a range squiggle: ML001 (client block-balance +
+ *  operator sanity, with quick-fixes) and ML213 (whole-prompt token budget). */
+const RANGE_SKIP = new Set(["ML001", "ML213"]);
+
+export interface MappedDiagnostics {
+  /** The flat list surfaced to the host via `onResult`. */
+  diagnostics: TemplateDiagnostic[];
+  /** Field-keyed, worst-severity-wins (for the precise field squiggles). */
+  byPath: Map<string, TokenDiagnostic>;
+  /** Range-keyed (directives ML240–244, no field path) for token squiggles. */
+  byRange: RangeDiagnostic[];
+}
+
+/**
+ * Turn raw engine diagnostics into the shapes the editor renders: a localized
+ * flat list, a field-path map, and a range map for directive diagnostics. Pure —
+ * the DOM glue (debounce, dispatch) lives in `runValidation`.
+ */
+export function mapDiagnostics(
+  raw: readonly Diagnostic[],
+  directives: DirectiveSpec[],
+  translateDiagnostic?: (d: TemplateDiagnostic) => string | undefined,
+): MappedDiagnostics {
+  // A directive name typed without its `:` yet (`{{identity`) is parsed by the
+  // engine as an unknown FIELD (ML101, fieldPath = the name). Drop those so a
+  // half-typed directive doesn't squiggle a real directive of the same name.
+  const directiveNames = new Set(directives.map((dir) => dir.name));
+  const diagnostics: TemplateDiagnostic[] = [];
+  const byRange: RangeDiagnostic[] = [];
+  for (const d of raw) {
+    if (d.fieldPath && directiveNames.has(d.fieldPath)) continue;
+    const base: TemplateDiagnostic = {
+      code: d.code,
+      severity: d.severity,
+      message: d.message,
+      fieldPath: d.fieldPath ?? null,
+    };
+    // Localize the engine's message (panel + squiggle tooltip read this).
+    const message = translateDiagnostic?.(base) ?? base.message;
+    diagnostics.push({ ...base, message });
+    // No `fieldPath` (inline directives ML240–244) ⇒ key by range instead,
+    // except codes rendered elsewhere (ML001 client block-balance, ML213 budget).
+    if (!base.fieldPath && !RANGE_SKIP.has(d.code)) {
+      byRange.push({
+        code: d.code,
+        severity: d.severity,
+        message,
+        range: d.range,
+      });
+    }
+  }
+  return { diagnostics, byPath: diagnosticsByPath(diagnostics), byRange };
+}
 
 /** Collapse diagnostics to their field path, keeping the worst severity. */
 export function diagnosticsByPath(

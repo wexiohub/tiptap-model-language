@@ -101,6 +101,8 @@ are usually needed.
 |---|---|---|---|
 | `namespaces` | `MlNamespace[]` | `[]` | Autocomplete + highlighting groups. Static case; push via `setModelData` for async data. |
 | `schema` | `FieldSchema` | `[]` | Flattened field schema for local validation. Static case. |
+| `directives` | `DirectiveSpec[]` | `[]` | Inline-directive vocabulary (see below). Static case. |
+| `directiveArgLabel` | `(name, value) => string \| undefined` | `undefined` | Friendly label for a directive arg value (e.g. operator id → name). |
 | `skipValidation` | `boolean` | `false` | Turn off the `validate()` pass. Structural squiggles still render. |
 | `debounceMs` | `number` | `300` | Debounce for the validation pass. |
 | `severities` | `DiagnosticSeverity[]` | all | Which severities render inline. |
@@ -109,6 +111,44 @@ are usually needed.
 | `onResult` | `(result) => void` | `undefined` | Full result hook (diagnostics + token estimate). |
 
 Full reference: [ml.wexio.io/docs](https://ml.wexio.io/docs).
+
+## Inline directives
+
+Directives are tokens like `{{verify_before: payments}}`,
+`{{identity: contact.email == billing.email}}` or `{{assignedTo: [1, 2]}}`. The
+vocabulary is **data** (a `DirectiveSpec[]`), fetched from your backend and handed
+to the extension exactly like the field schema, so nothing about the directive
+names is hardcoded.
+
+```ts
+import { ModelSyntax, type DirectiveSpec } from "tiptap-model-language";
+
+const directives: DirectiveSpec[] = [
+  { name: "verify_before", hasBody: false,
+    arg: { kind: "scalar", type: "enum", values: ["payments", "calendar"] } },
+  { name: "identity", hasBody: false,
+    arg: { kind: "comparison", type: "field",
+           comparison: { operators: ["=="], operandType: "field" } } },
+  { name: "assignedTo", hasBody: false,
+    arg: { kind: "list", type: "id", values: ["1", "2", "3"] } },
+];
+
+ModelSyntax.configure({
+  namespaces,
+  schema,
+  directives,
+  // Show operator ids as names in autocomplete + a hover title; the document
+  // keeps the raw id, so `{{assignedTo: [1]}}` is what serialises.
+  directiveArgLabel: (name, value) =>
+    name === "assignedTo" ? operators.find((o) => o.id === value)?.name : undefined,
+});
+```
+
+Directives are highlighted distinctly, autocompleted (name, then an arg stage
+that lists enum values, builds `[a, b]` lists, or completes comparison operands
+with field paths), and validated against the specs. New diagnostic codes:
+`ML240` unknown-directive, `ML241` missing-required-argument, `ML242`
+argument-type-mismatch, `ML243` value-not-in-`values`, `ML244` unexpected-argument.
 
 ## The engine, re-exported
 

@@ -11,7 +11,7 @@ export function modelTokenDisplay(
   if (p.directive) return inner.trim();
   const ns = namespaces.find((n) => n.key === p.namespace);
   const field = ns?.fields.find((f) => f.key === p.field);
-  const base = field?.label ?? p.field ?? p.path;
+  const base = field?.label ?? p.field;
   const label = ns ? base : p.path;
   return p.filters.length
     ? `${label} · ${p.filters.map((f) => f.name).join(" · ")}`

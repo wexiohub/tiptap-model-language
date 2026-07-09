@@ -6,3 +6,6 @@ coverage/
 .idea/
 .vscode/
 *.tsbuildinfo
+
+# Local preview app (mirrors tiptap-model-language-demo, uses the local lib).
+demo/

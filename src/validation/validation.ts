@@ -1,18 +1,16 @@
 import type { Editor } from "@tiptap/core";
 import { validate } from "model-language";
 import { key } from "../core/plugin-key";
-import type {
-  ModelSyntaxOptions,
-  ModelSyntaxStorage,
-  TemplateDiagnostic,
-  TokenDiagnostic,
-} from "../core/types";
-import { diagnosticsByPath } from "./diagnostics";
+import type { ModelSyntaxOptions, ModelSyntaxStorage } from "../core/types";
+import { mapDiagnostics } from "./diagnostics";
 
 /**
  * Debounced local validation via the `model-language` package — pushes
  * fieldPath-keyed diagnostics into the plugin state (for squiggles) and
  * surfaces the full result via `onResult`. Runs in-process, no round-trip.
+ *
+ * This is the DOM glue (debounce + `getState` + `dispatch`); the pure mapping it
+ * delegates to lives in `mapDiagnostics` (unit-tested there).
  */
 export function runValidation(
   editor: Editor,
@@ -26,37 +24,33 @@ export function runValidation(
   storage.timer = setTimeout(() => {
     if (!editor || editor.isDestroyed) return;
     const template = editor.getText({ blockSeparator: "\n" });
-    const push = (byPath: Map<string, TokenDiagnostic>) => {
-      if (editor.isDestroyed) return;
-      editor.view.dispatch(editor.state.tr.setMeta(key, { byPath }));
-    };
-    const schema = key.getState(editor.state)?.schema ?? [];
-    // No fields yet (schema still loading) or no tokens → nothing to check
-    // semantically. Structural squiggles run in buildDecorations regardless.
-    if (!schema.length || !template.includes("{{")) {
-      push(new Map());
+    const st = key.getState(editor.state);
+    const schema = st?.schema ?? [];
+    const directives = st?.directives ?? [];
+    // Nothing to check when there's no vocabulary (no fields and no directives)
+    // or no tokens. Structural squiggles run in buildDecorations regardless.
+    if ((!schema.length && !directives.length) || !template.includes("{{")) {
+      if (!editor.isDestroyed)
+        editor.view.dispatch(
+          editor.state.tr.setMeta(key, { byPath: new Map(), byRange: [] }),
+        );
       onResult?.({ diagnostics: [], maxTokenEstimate: null });
       return;
     }
     let result: ReturnType<typeof validate>;
     try {
-      result = validate(template, schema);
+      result = validate(template, schema, { directives });
     } catch {
       // The package is total (never throws), but guard defensively.
       return;
     }
-    const diagnostics: TemplateDiagnostic[] = result.diagnostics.map((d) => {
-      const base: TemplateDiagnostic = {
-        code: d.code,
-        severity: d.severity,
-        message: d.message,
-        fieldPath: d.fieldPath ?? null,
-      };
-      // Localize the engine's message (both the panel and the squiggle tooltip
-      // read this) — the host maps by `code`.
-      return { ...base, message: translateDiagnostic?.(base) ?? base.message };
-    });
-    push(diagnosticsByPath(diagnostics));
+    const { diagnostics, byPath, byRange } = mapDiagnostics(
+      result.diagnostics,
+      directives,
+      translateDiagnostic,
+    );
+    if (!editor.isDestroyed)
+      editor.view.dispatch(editor.state.tr.setMeta(key, { byPath, byRange }));
     onResult?.({ diagnostics, maxTokenEstimate: result.maxTokenEstimate });
   }, debounceMs);
 }

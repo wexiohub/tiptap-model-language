@@ -6,6 +6,7 @@ import { runValidation } from "./validation";
 const opts = (o: Partial<ModelSyntaxOptions> = {}): ModelSyntaxOptions => ({
   namespaces: [],
   schema: [],
+  directives: [],
   skipValidation: false,
   debounceMs: 10,
   severities: ["error", "warning", "info"],

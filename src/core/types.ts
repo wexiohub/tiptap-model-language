@@ -1,4 +1,4 @@
-import type { FieldSchema } from "model-language";
+import type { DirectiveSpec, FieldSchema, Range } from "model-language";
 import type { MlNamespace } from "../schema/namespaces";
 
 export type DiagnosticSeverity = "error" | "warning" | "info";
@@ -48,6 +48,12 @@ export interface ModelLanguageLabels {
   severity: Record<DiagnosticSeverity, string>;
 }
 
+/** Resolve a directive arg value (e.g. an operator id) to a display label. */
+export type DirectiveArgLabel = (
+  directiveName: string,
+  value: string,
+) => string | undefined;
+
 export interface ModelSyntaxOptions {
   /** Initial namespaces (autocomplete + highlighting). Static case only — for
    *  async / changing data push via the `setModelData` command instead. */
@@ -55,6 +61,16 @@ export interface ModelSyntaxOptions {
   /** Initial org field schema (local validation). Static case only — for
    *  async / changing data push via the `setModelData` command instead. */
   schema: FieldSchema;
+  /** Inline-directive vocabulary (`{{verify_before: …}}`, `{{identity: …}}`, …).
+   *  When supplied, directives are highlighted, autocompleted and validated
+   *  (ML240–244) against these specs. Static case only — push via `setModelData`
+   *  for async data. Empty ⇒ directives behave as today (no name/arg checks). */
+  directives: DirectiveSpec[];
+  /** Friendly label for a directive arg VALUE (e.g. an operator id → a name).
+   *  The document keeps the raw value (`{{assignedTo: [1]}}`); this only drives
+   *  the autocomplete label and a hover title on the value. Return undefined to
+   *  show the raw value. Static case only — push via `setModelData` for async. */
+  directiveArgLabel?: DirectiveArgLabel;
   /** Disable the local `validate()` pass entirely (structural squiggles stay). */
   skipValidation: boolean;
   /** Debounce for the validation pass, ms. */
@@ -74,11 +90,27 @@ export interface ModelSyntaxStorage {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
+/** A diagnostic anchored by document range rather than a field path — inline
+ *  directive checks (ML240–244) carry no `fieldPath`, so they're routed here and
+ *  rendered as a squiggle over their token range. */
+export interface RangeDiagnostic {
+  severity: DiagnosticSeverity;
+  message: string;
+  code: string;
+  range: Range;
+}
+
 export interface ModelSyntaxState {
   namespaces: MlNamespace[];
   /** Flattened field schema for the `model-language` `validate()` call. */
   schema: FieldSchema;
+  /** Inline-directive vocabulary threaded into `validate()` + autocomplete. */
+  directives: DirectiveSpec[];
+  /** Optional id→label resolver for directive arg values (hover + autocomplete). */
+  directiveArgLabel?: DirectiveArgLabel;
   byPath: Map<string, TokenDiagnostic>;
+  /** Range-anchored diagnostics (directives) — no field path to key on. */
+  byRange: RangeDiagnostic[];
 }
 
 /** Mutable flags shared between the main plugin, the tooltip and the

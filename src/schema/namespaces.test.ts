@@ -81,3 +81,43 @@ describe("static tables", () => {
     expect(DATE_FORMATS).toContain("yyyy-MM-dd");
   });
 });
+
+describe("parseModelToken — inline directives", () => {
+  const dirs = new Set(["verify_before", "assignedToRoles"]);
+
+  it("classifies a known directive head as a directive", () => {
+    expect(parseModelToken("verify_before: payments", dirs).directive).toBe(
+      true,
+    );
+    expect(parseModelToken("assignedToRoles: [AGENT]", dirs).directive).toBe(
+      true,
+    );
+  });
+
+  it("is not a directive without the vocabulary", () => {
+    expect(parseModelToken("verify_before: payments").directive).toBe(false);
+  });
+
+  it("an unknown `name:` head is not a directive", () => {
+    expect(parseModelToken("whatever: x", dirs).directive).toBe(false);
+  });
+
+  it("control tokens stay directives regardless of vocabulary", () => {
+    expect(parseModelToken("if contact.vip", dirs).directive).toBe(true);
+    expect(parseModelToken("/if", dirs).directive).toBe(true);
+  });
+});
+
+describe("parseModelToken — directive head edge", () => {
+  it("a token with no `name:` head is not a directive even with a vocabulary", () => {
+    expect(
+      parseModelToken("contact.first_name", new Set(["identity"])).directive,
+    ).toBe(false);
+  });
+});
+
+describe("parseModelToken — empty directive vocabulary", () => {
+  it("an empty directives set does not classify a `name:` head", () => {
+    expect(parseModelToken("verify: x", new Set()).directive).toBe(false);
+  });
+});

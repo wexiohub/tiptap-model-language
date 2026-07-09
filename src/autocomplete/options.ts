@@ -1,4 +1,6 @@
 import { format as formatDate } from "date-fns";
+import type { DirectiveSpec } from "model-language";
+import type { DirectiveArgLabel } from "../core/types";
 import {
   DATE_FORMATS,
   ML_FILTERS,
@@ -51,11 +53,14 @@ function previewDateFormat(token: string): string {
   try {
     return formatDate(new Date(), t);
   } catch {
+    /* v8 ignore next -- the fixed DATE_FORMATS list never throws; defensive. */
     return "";
   }
 }
 
 function timezoneOptions(frag: string): string[] {
+  /* v8 ignore start -- Intl.supportedValuesOf is always present on our targets;
+     the try/catch + COMMON_TZ fallback only guard ancient runtimes. */
   let zones: string[] = [];
   try {
     zones =
@@ -66,6 +71,7 @@ function timezoneOptions(frag: string): string[] {
     zones = [];
   }
   if (!zones.length) zones = COMMON_TZ;
+  /* v8 ignore stop */
   const q = frag.toLowerCase();
   return zones.filter((z) => !q || z.toLowerCase().includes(q));
 }
@@ -303,6 +309,121 @@ const BLOCK_SNIPPETS: Omit<ModelTokenOption, "group" | "kind">[] = [
   },
 ];
 
+// ── Inline directives ────────────────────────────────────────────────────────
+
+/**
+ * Arg completions for an inline directive `{{name: <frag>}}`, driven by its
+ * `DirectiveSpec`: enum values for a scalar enum, an incrementally-built `[a, b]`
+ * for a list enum, and field paths for the LEFT operand of a comparison
+ * (`identity`). Free-form scalars (number / text / id) get no value list.
+ */
+function directiveArgOptions(
+  spec: DirectiveSpec,
+  frag: string,
+  namespaces: MlNamespace[],
+  argLabel?: DirectiveArgLabel,
+): ModelTokenOption[] {
+  const arg = spec.arg;
+  if (!arg) return [];
+  const hint = spec.description || `${spec.name} argument`;
+  // A value's display label (e.g. operator id → name); the inserted text stays
+  // the raw value, so `{{assignedTo: [1]}}` is what's saved / rendered.
+  const labelOf = (v: string) => argLabel?.(spec.name, v) ?? v;
+  const hintFor = (v: string) => (labelOf(v) !== v ? `${hint} · ${v}` : hint);
+  const g = { hint, group: "Directive arg", kind: "block" as const };
+
+  // Comparison (identity): complete BOTH operands with a field path. `field`
+  // operands offer the field list; a `text` right operand is free input.
+  if (arg.kind === "comparison") {
+    /* v8 ignore next 2 -- a comparison spec always carries operators + operandType. */
+    const op = arg.comparison?.operators[0] ?? "==";
+    const asField = (arg.comparison?.operandType ?? "field") === "field";
+    // Right operand: `<left> <op> <frag>` → complete + close the comparison.
+    const rhs = frag.match(/^([\w.]+)\s*(==|!=|<=|>=|<|>)\s*([\w.]*)$/);
+    if (rhs) {
+      if (!asField) return [];
+      const [, lhs, cmp, rfrag] = rhs;
+      return fieldMatches(namespaces, rfrag).map(({ path, f }) => ({
+        insert: `${spec.name}: ${lhs} ${cmp} ${path}`,
+        label: path,
+        hint: `${f.label} · ${f.type}`,
+        group: "Directive arg",
+        kind: "path" as const,
+        close: true,
+      }));
+    }
+    // Left operand: complete the field, then step to the operator.
+    const left = frag.match(/^([\w.]*)$/);
+    if (!left) return [];
+    return fieldMatches(namespaces, left[1]).map(({ path, f }) => ({
+      insert: `${spec.name}: ${path} ${op} `,
+      label: path,
+      hint: `${f.label} · ${f.type}`,
+      group: "Directive arg",
+      kind: "path" as const,
+      close: false,
+    }));
+  }
+
+  const values = arg.values ?? [];
+  if (!values.length) return [];
+
+  // List enum / id list (e.g. assignedToRoles, assignedTo): build `[A, B]` one
+  // value at a time. Split on commas so any value shape (ids too) is handled.
+  if (arg.kind === "list") {
+    const body = frag.replace(/^\[/, "");
+    const segs = body.split(",");
+    const fq = (segs.at(-1) ?? "").trim().toLowerCase();
+    const picked = segs
+      .slice(0, -1)
+      .map((s) => s.trim())
+      .filter((s) => values.includes(s));
+    const prefix = picked.join(", ");
+    const open = `${spec.name}: [${prefix}${prefix ? ", " : ""}`;
+    const out: ModelTokenOption[] = values
+      .filter(
+        (v) =>
+          !picked.includes(v) &&
+          (!fq ||
+            v.toLowerCase().includes(fq) ||
+            labelOf(v).toLowerCase().includes(fq)),
+      )
+      .map((v) => ({
+        ...g,
+        insert: `${open}${v}, `,
+        label: labelOf(v),
+        hint: hintFor(v),
+        close: false,
+      }));
+    if (picked.length)
+      out.push({
+        ...g,
+        insert: `${spec.name}: [${prefix}]`,
+        label: "· done ·",
+        hint: "close the list",
+        close: true,
+      });
+    return out;
+  }
+
+  // Scalar enum (e.g. verify_before): a single value, close.
+  const fq = frag.trim().replace(/^"|"$/g, "").toLowerCase();
+  return values
+    .filter(
+      (v) =>
+        !fq ||
+        v.toLowerCase().includes(fq) ||
+        labelOf(v).toLowerCase().includes(fq),
+    )
+    .map((v) => ({
+      ...g,
+      insert: `${spec.name}: ${v}`,
+      label: labelOf(v),
+      hint: hintFor(v),
+      close: true,
+    }));
+}
+
 // ── Main: staged completion ──────────────────────────────────────────────────
 
 /**
@@ -312,6 +433,8 @@ const BLOCK_SNIPPETS: Omit<ModelTokenOption, "group" | "kind">[] = [
 export function buildModelOptions(
   namespaces: MlNamespace[],
   query: string,
+  directives: DirectiveSpec[] = [],
+  directiveArgLabel?: DirectiveArgLabel,
 ): ModelTokenOption[] {
   // 1. Filter / date-format stage (after a pipe).
   const pipe = query.lastIndexOf("|");
@@ -344,6 +467,7 @@ export function buildModelOptions(
           insert: `${left} | date: "${d}"`,
           label: `"${d}"`,
           // Show what the token renders as right now, e.g. "Jul 6, 2026".
+          /* v8 ignore next -- DATE_FORMATS all render, so `eg` is never empty. */
           hint: eg ? `e.g. ${eg}` : "date/time format",
           group: "Date format",
           kind: "filter",
@@ -422,6 +546,20 @@ export function buildModelOptions(
       }));
   }
 
+  // 1.6 Inline directive argument — `{{verify_before: <frag>}}` etc. The head is
+  // a known directive name followed by a colon; complete its arg from the spec.
+  const dirArg = query.match(/^([A-Za-z_]\w*)\s*:\s*(.*)$/);
+  if (dirArg) {
+    const spec = directives.find((d) => d.name === dirArg[1]);
+    if (spec)
+      return directiveArgOptions(
+        spec,
+        dirArg[2],
+        namespaces,
+        directiveArgLabel,
+      );
+  }
+
   // 2. Condition stages: if / elseif → path → operator → value → and/or.
   const cm = query.match(/^(if|elseif)\s+(.*)$/i);
   if (cm) {
@@ -488,6 +626,7 @@ export function buildModelOptions(
       const body = am[3];
       const picked = [...body.matchAll(/"([^"]*)"/g)].map((x) => x[1]);
       const fragMatch = body.match(/(?:^|,)\s*"?([^",\]]*)$/);
+      /* v8 ignore next -- the trailing-fragment regex always matches (even empty). */
       const frag = (fragMatch ? fragMatch[1] : "").toLowerCase();
       const prefix = picked.map((v) => `"${v}"`).join(", ");
       const open = `${lead}${am[1]} ${am[2]} [${prefix}${prefix ? ", " : ""}`;
@@ -624,6 +763,17 @@ export function buildModelOptions(
     )
       continue;
     opts.push({ ...b, group: "Blocks", kind: "block" });
+  }
+  for (const d of directives) {
+    if (q && !d.name.toLowerCase().includes(q)) continue;
+    opts.push({
+      insert: `${d.name}: `,
+      label: `${d.name}: …`,
+      hint: d.description || "inline directive",
+      group: "Directives",
+      kind: "block",
+      close: false,
+    });
   }
   for (const { path, f } of fieldMatches(namespaces, query.trim())) {
     opts.push({

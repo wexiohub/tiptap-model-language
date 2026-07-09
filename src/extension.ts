@@ -1,10 +1,11 @@
 import { Extension } from "@tiptap/core";
 import { Plugin } from "@tiptap/pm/state";
 import { DecorationSet } from "@tiptap/pm/view";
-import type { FieldSchema } from "model-language";
+import type { DirectiveSpec, FieldSchema } from "model-language";
 import { createSuggestionPlugin } from "./autocomplete/suggestion";
 import { key } from "./core/plugin-key";
 import type {
+  DirectiveArgLabel,
   ModelSyntaxOptions,
   ModelSyntaxState,
   ModelSyntaxStorage,
@@ -25,6 +26,8 @@ declare module "@tiptap/core" {
       setModelData: (data: {
         namespaces: MlNamespace[];
         schema?: FieldSchema;
+        directives?: DirectiveSpec[];
+        directiveArgLabel?: DirectiveArgLabel;
       }) => ReturnType;
     };
   }
@@ -48,6 +51,8 @@ export const ModelSyntax = Extension.create<
     return {
       namespaces: [],
       schema: [],
+      directives: [],
+      directiveArgLabel: undefined,
       skipValidation: false,
       debounceMs: 300,
       severities: ["error", "warning", "info"],
@@ -64,13 +69,16 @@ export const ModelSyntax = Extension.create<
   addCommands() {
     return {
       setModelData:
-        ({ namespaces, schema }) =>
+        ({ namespaces, schema, directives, directiveArgLabel }) =>
         ({ tr, dispatch, editor }) => {
           if (dispatch) {
             dispatch(
               tr.setMeta(key, {
                 namespaces,
                 schema: buildValidateSchema(namespaces, schema ?? []),
+                directives: directives ?? this.options.directives,
+                directiveArgLabel:
+                  directiveArgLabel ?? this.options.directiveArgLabel,
               }),
             );
             runValidation(editor, this.options, this.storage);
@@ -103,6 +111,8 @@ export const ModelSyntax = Extension.create<
       this.options.namespaces,
       this.options.schema,
     );
+    const initialDirectives = this.options.directives;
+    const initialDirectiveArgLabel = this.options.directiveArgLabel;
     // Flags shared between the main plugin (writer), the tooltip and the
     // autocomplete (readers).
     const ctx: PluginContext = {
@@ -122,7 +132,10 @@ export const ModelSyntax = Extension.create<
         init: () => ({
           namespaces: initialNamespaces,
           schema: initialSchema,
+          directives: initialDirectives,
+          directiveArgLabel: initialDirectiveArgLabel,
           byPath: new Map(),
+          byRange: [],
         }),
         apply(tr, value, oldState, newState) {
           // Runs before the Suggestion plugin's apply so the flags are fresh

@@ -64,6 +64,9 @@ export function buildDecorations(
   const show = (sev: DiagnosticSeverity) => opts.severities.includes(sev);
   const showErr = show("error");
   const decos: Decoration[] = [];
+  // Directive names drive highlighting + classification of inline `{{name: …}}`.
+  /* v8 ignore next -- state always seeds directives to []; the ?? is defensive. */
+  const directiveNames = new Set((st.directives ?? []).map((d) => d.name));
 
   // Flatten every text node into one string. `posAt[i]` is the doc position of
   // flattened char `i`; a synthetic newline (posAt = -1) marks each block
@@ -103,15 +106,19 @@ export function buildDecorations(
         } else if (p === to) {
           to = p + 1;
         } else {
+          /* v8 ignore start -- doc positions in a run are always contiguous
+             (gaps become separators), so this reflow branch can't fire. */
           decos.push(Decoration.inline(from, to, attrs));
           from = p;
           to = p + 1;
+          /* v8 ignore stop */
         }
       }
       if (from >= 0) decos.push(Decoration.inline(from, to, attrs));
     },
     pos(i) {
       for (let k = i; k < posAt.length; k++) if (posAt[k] >= 0) return posAt[k];
+      /* v8 ignore next -- a fix position always lands on a real char in the doc. */
       return doc.content.size;
     },
   };
@@ -124,7 +131,7 @@ export function buildDecorations(
     const end = start + m[0].length;
     const rawInner = m[0].slice(2, -2);
     const inner = rawInner.trim();
-    const parsed = parseModelToken(inner);
+    const parsed = parseModelToken(inner, directiveNames);
     const innerStart = start + 2; // char offset of the inner text
     blocks.push({ start, end, inner });
 
@@ -138,10 +145,39 @@ export function buildDecorations(
     // Braces + per-token colouring inside.
     painter.paint(start, start + 2, { class: BRACE_CLASS });
     painter.paint(end - 2, end, { class: BRACE_CLASS });
-    for (const tok of tokenizeExpression(rawInner)) {
+    for (const tok of tokenizeExpression(rawInner, directiveNames)) {
       painter.paint(innerStart + tok.start, innerStart + tok.end, {
         class: HL_CLASS[tok.kind],
       });
+    }
+
+    // Directive arg value labels (e.g. operator id → name): the doc keeps the
+    // raw id, but each value that resolves to a label gets a dotted underline +
+    // a native hover `title` showing the name. Skip comparison args (identity),
+    // whose operands are fields, not looked-up values.
+    if (st.directiveArgLabel && parsed.directive) {
+      const head = inner.match(/^([A-Za-z_]\w*)\s*:/)?.[1];
+      const spec = head
+        ? st.directives.find((dv) => dv.name === head)
+        : undefined;
+      const colon = rawInner.indexOf(":");
+      if (spec?.arg && spec.arg.kind !== "comparison" && colon >= 0) {
+        const argText = rawInner.slice(colon + 1);
+        const valRe = /[A-Za-z0-9_][\w-]*/g;
+        let vm: RegExpExecArray | null;
+        while ((vm = valRe.exec(argText))) {
+          const value = vm[0];
+          const label = st.directiveArgLabel(head as string, value);
+          if (label && label !== value) {
+            const at = innerStart + colon + 1 + vm.index;
+            painter.paint(at, at + value.length, {
+              class: "underline decoration-dotted underline-offset-2",
+              title: label,
+              "data-ml-arg-value": value,
+            });
+          }
+        }
+      }
     }
 
     // Precise field diagnostics — squiggle just the offending occurrence(s).
@@ -167,7 +203,9 @@ export function buildDecorations(
         const next = rawInner[idx + fp.length];
         const bounded =
           (prev === undefined || !/[\w.]/.test(prev)) &&
-          (next === undefined || !/[\w.]/.test(next));
+          (next === undefined || !/[\w.]/.test(next)) &&
+          // A `name:` head is a directive / label, not a field path.
+          next !== ":";
         if (bounded) {
           const attrs: Record<string, string> = {
             class: DIAG_CLASS[d.severity],
@@ -223,6 +261,75 @@ export function buildDecorations(
   }
 
   if (showErr) addBlockBalance(blocks, painter, labels);
+
+  // Range-anchored diagnostics (inline directives, ML240–244) carry no field
+  // path, so they're keyed by the engine's line/column range. The engine sees
+  // `editor.getText({ blockSeparator: "\n" })`; mirror that char-for-char with a
+  // PM position per character so ranges map back exactly — including the extra
+  // newlines that hard breaks and empty blocks add.
+  /* v8 ignore next -- state always seeds byRange to []; the ?? is defensive. */
+  const byRange = st.byRange ?? [];
+  if (byRange.length) {
+    let out = "";
+    const posOfChar: number[] = []; // PM pos per char (-1 for a block separator)
+    doc.forEach((block, offset) => {
+      if (out.length) {
+        out += "\n";
+        posOfChar.push(-1);
+      }
+      const base = offset + 1; // content start of this block
+      block.descendants((n, p) => {
+        if (n.isText && n.text) {
+          for (let k = 0; k < n.text.length; k++) {
+            out += n.text[k];
+            posOfChar.push(base + p + k);
+          }
+          return;
+        }
+        /* v8 ignore next 4 -- inline content here is only text or a hardBreak;
+           any other node type is unreachable in this editor. */
+        if (n.type.name === "hardBreak") {
+          out += "\n";
+          posOfChar.push(base + p);
+        }
+      });
+    });
+    const lineChar: number[] = [0];
+    for (let i = 0; i < out.length; i++)
+      if (out[i] === "\n") lineChar.push(i + 1);
+    const posAtLineCol = (line: number, col: number): number | null => {
+      const ls = lineChar[line - 1];
+      /* v8 ignore next -- valid engine ranges are always within the doc. */
+      if (ls == null) return null;
+      const p = posOfChar[ls + (col - 1)];
+      /* v8 ignore next -- a directive token never starts on a block separator. */
+      return p == null || p < 0 ? null : p;
+    };
+    for (const d of byRange) {
+      if (!show(d.severity)) continue;
+      const { startLine, startColumn, endLine, endColumn } = d.range;
+      // Inline directives live on a single line; skip cross-line so a decoration
+      // never spans a block boundary (ProseMirror forbids it).
+      if (startLine !== endLine) continue;
+      const from = posAtLineCol(startLine, startColumn);
+      // endColumn is exclusive: anchor on the last covered char, then +1.
+      const lastCharPos = posAtLineCol(endLine, endColumn - 1);
+      /* v8 ignore start -- valid single-line ranges always resolve, from < to. */
+      if (from == null || lastCharPos == null) continue;
+      const to = lastCharPos + 1;
+      if (to <= from) continue;
+      /* v8 ignore stop */
+      decos.push(
+        Decoration.inline(from, to, {
+          class: DIAG_CLASS[d.severity],
+          "data-ml-error": d.message,
+          "data-ml-sev": d.severity,
+          "data-ml-code": d.code,
+        }),
+      );
+    }
+  }
+
   return DecorationSet.create(doc, decos);
 }
 
@@ -239,20 +346,12 @@ function addBlockBalance(
   painter: Painter,
   labels: ModelLanguageLabels,
 ): void {
-  const errAttrs = (msg: string, fix?: string): Record<string, string> => {
-    const a: Record<string, string> = {
-      class: DIAG_CLASS.error,
-      "data-ml-error": msg,
-      "data-ml-sev": "error",
-      "data-ml-code": "ML001",
-    };
-    if (fix) {
-      a["data-ml-fix-kind"] = "append";
-      a["data-ml-fix-text"] = fix;
-      a["data-ml-fix-label"] = labels.addCloseTag(fix);
-    }
-    return a;
-  };
+  const errAttrs = (msg: string): Record<string, string> => ({
+    class: DIAG_CLASS.error,
+    "data-ml-error": msg,
+    "data-ml-sev": "error",
+    "data-ml-code": "ML001",
+  });
   const flagUnclosed = (s: OpenBlock, boundary: number | null) => {
     const tag = `{{/${s.close}}}`;
     const a: Record<string, string> = {

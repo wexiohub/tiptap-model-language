@@ -62,3 +62,9 @@ describe("modelTokenTone", () => {
     expect(modelTokenTone("contact.missing", ns)).toBe("value");
   });
 });
+
+describe("modelTokenDisplay — unknown namespace", () => {
+  it("falls back to the raw path when the namespace is unknown", () => {
+    expect(modelTokenDisplay("mystery.field", ns)).toBe("mystery.field");
+  });
+});

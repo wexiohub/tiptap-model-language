@@ -1,3 +1,4 @@
+import type { DirectiveSpec } from "model-language";
 import { describe, expect, it } from "vitest";
 import type { MlNamespace } from "../schema/namespaces";
 import { buildModelOptions, capOptions, optionGroups } from "./options";
@@ -189,5 +190,293 @@ describe("capOptions / optionGroups", () => {
   it("lists distinct groups in first-seen order", () => {
     const opts = buildModelOptions(ns, "if contact.age ");
     expect(optionGroups(opts)).toEqual([...new Set(opts.map((o) => o.group))]);
+  });
+});
+
+describe("buildModelOptions — inline directives", () => {
+  const directives: DirectiveSpec[] = [
+    {
+      name: "verify_before",
+      hasBody: false,
+      arg: { kind: "scalar", type: "enum", values: ["payments", "calendar"] },
+    },
+    {
+      name: "identity",
+      hasBody: false,
+      arg: {
+        kind: "comparison",
+        type: "field",
+        comparison: { operators: ["=="], operandType: "field" },
+      },
+    },
+    {
+      name: "assignedToRoles",
+      hasBody: false,
+      arg: { kind: "list", type: "enum", values: ["OWNER", "AGENT"] },
+    },
+  ];
+
+  it("offers directive names at the token start", () => {
+    const opts = buildModelOptions(ns, "", directives);
+    const dir = opts.find((o) => o.label === "verify_before: …");
+    expect(dir?.group).toBe("Directives");
+    expect(dir?.insert).toBe("verify_before: ");
+  });
+
+  it("no directives configured → no Directives group", () => {
+    const opts = buildModelOptions(ns, "");
+    expect(opts.some((o) => o.group === "Directives")).toBe(false);
+  });
+
+  it("scalar-enum directive offers its values, and closes", () => {
+    const opts = buildModelOptions(ns, "verify_before: ", directives);
+    expect(opts.map((o) => o.label)).toEqual(["payments", "calendar"]);
+    expect(opts[0].insert).toBe("verify_before: payments");
+    expect(opts[0].close).toBe(true);
+  });
+
+  it("list-enum directive builds a bracketed list", () => {
+    const opts = buildModelOptions(ns, "assignedToRoles: [", directives);
+    expect(opts.map((o) => o.label)).toEqual(["OWNER", "AGENT"]);
+    expect(opts[0].insert).toBe("assignedToRoles: [OWNER, ");
+  });
+
+  it("list-enum offers 'done' after a pick", () => {
+    const opts = buildModelOptions(ns, "assignedToRoles: [OWNER, ", directives);
+    expect(opts.map((o) => o.label)).toEqual(["AGENT", "· done ·"]);
+    expect(opts.find((o) => o.label === "· done ·")?.insert).toBe(
+      "assignedToRoles: [OWNER]",
+    );
+  });
+
+  it("comparison directive completes the left operand with a field", () => {
+    const opts = buildModelOptions(ns, "identity: contact.", directives);
+    const f = opts.find((o) => o.label === "contact.first_name");
+    expect(f?.insert).toBe("identity: contact.first_name == ");
+    expect(f?.kind).toBe("path");
+  });
+
+  it("comparison directive completes the RIGHT operand and closes", () => {
+    const opts = buildModelOptions(
+      ns,
+      "identity: contact.age == contact.fi",
+      directives,
+    );
+    const f = opts.find((o) => o.label === "contact.first_name");
+    expect(f?.insert).toBe("identity: contact.age == contact.first_name");
+    expect(f?.close).toBe(true);
+  });
+
+  it("an id-list directive suggests its values (operator ids)", () => {
+    const dirs: DirectiveSpec[] = [
+      {
+        name: "assignedTo",
+        hasBody: false,
+        arg: { kind: "list", type: "id", values: ["jack", "mei"] },
+      },
+    ];
+    const opts = buildModelOptions(ns, "assignedTo: [", dirs);
+    expect(opts.map((o) => o.label)).toEqual(["jack", "mei"]);
+    expect(opts[0].insert).toBe("assignedTo: [jack, ");
+  });
+});
+
+describe("buildModelOptions — directive arg labels", () => {
+  const dirs: DirectiveSpec[] = [
+    {
+      name: "assignedTo",
+      hasBody: false,
+      arg: { kind: "list", type: "id", values: ["1", "2"] },
+    },
+  ];
+  const argLabel = (n: string, v: string) =>
+    n === "assignedTo"
+      ? ({ "1": "Jack Nilson", "2": "Mei Chen" } as Record<string, string>)[v]
+      : undefined;
+
+  it("shows the resolved name as the label but inserts the id", () => {
+    const opts = buildModelOptions(ns, "assignedTo: [", dirs, argLabel);
+    expect(opts.map((o) => o.label)).toEqual(["Jack Nilson", "Mei Chen"]);
+    expect(opts[0].insert).toBe("assignedTo: [1, ");
+  });
+
+  it("filters by the typed name, not just the id", () => {
+    const opts = buildModelOptions(ns, "assignedTo: [me", dirs, argLabel);
+    expect(opts.map((o) => o.label)).toEqual(["Mei Chen"]);
+    expect(opts[0].insert).toBe("assignedTo: [2, ");
+  });
+});
+
+describe("buildModelOptions — branch coverage", () => {
+  it("enum field: operator stage lists ==, !=, in, exists", () => {
+    const ls = labels("if contact.priority ");
+    expect(groups("if contact.priority ")).toContain("Operator");
+    expect(ls.some((l) => l.includes("=="))).toBe(true);
+    expect(ls.some((l) => l.includes("in"))).toBe(true);
+  });
+
+  it("string field: default stage offers a free-text placeholder", () => {
+    const opts = buildModelOptions(ns, "contact.first_name | default: ");
+    expect(opts.map((o) => o.label)).toEqual(['"…"']);
+  });
+
+  it("string field: == value stage with no enum values yields nothing", () => {
+    expect(buildModelOptions(ns, 'if contact.first_name == "x')).toEqual([]);
+  });
+});
+
+describe("buildModelOptions — type-specific operators", () => {
+  it("boolean field: is true / is false", () => {
+    const ls = labels("if contact.vip ");
+    expect(ls).toContain("is true");
+    expect(ls).toContain("is false");
+  });
+
+  it("datetime field: filter-based comparisons + exists", () => {
+    const ls = labels("if contact.created ");
+    expect(ls.some((l) => l.includes("is_past"))).toBe(true);
+    expect(ls.some((l) => l.includes("days_ago"))).toBe(true);
+  });
+});
+
+describe("buildModelOptions — filter-chain type resolution", () => {
+  it("resolves the type through an intermediate filter for default:", () => {
+    // `round` keeps a number, so default still offers 0 (exercises the filter
+    // loop in resolveType).
+    const opts = buildModelOptions(ns, "contact.age | round: 0 | default: ");
+    expect(opts.map((o) => o.label)).toEqual(["0"]);
+  });
+});
+
+describe("buildModelOptions — post-path + base edges", () => {
+  it("datetime post-path offers the date filter", () => {
+    const opts = buildModelOptions(ns, "contact.created ");
+    expect(opts.some((o) => o.label === "| date")).toBe(true);
+  });
+
+  it("post-path on an unknown field yields nothing", () => {
+    expect(buildModelOptions(ns, "nope.zzz ")).toEqual([]);
+  });
+
+  it("base stage filters directive names by the query", () => {
+    const dirs = [
+      { name: "verify_before", hasBody: false as const, arg: null },
+      { name: "assignedTo", hasBody: false as const, arg: null },
+    ];
+    const labels = buildModelOptions(ns, "verif", dirs).map((o) => o.label);
+    expect(labels).toContain("verify_before: …");
+    expect(labels).not.toContain("assignedTo: …");
+  });
+});
+
+describe("buildModelOptions — unknown-field guards", () => {
+  it("operator stage on an unknown field yields nothing", () => {
+    expect(buildModelOptions(ns, "if nope.x ==x")).toEqual([]);
+  });
+
+  it("array-arg stage on a field with no values yields nothing", () => {
+    expect(buildModelOptions(ns, "if contact.first_name in [")).toEqual([]);
+  });
+});
+
+describe("buildModelOptions — remaining branch edges", () => {
+  it("a chained `and` clause completes the second comparison's field", () => {
+    const opts = buildModelOptions(ns, "if contact.vip and contact.fi");
+    expect(opts.some((o) => o.label === "contact.first_name")).toBe(true);
+    // `lead` carries the first clause + connector.
+    expect(opts[0].insert.startsWith("if contact.vip and ")).toBe(true);
+  });
+
+  it("array-arg value stage filters by a typed fragment", () => {
+    const opts = buildModelOptions(ns, "if contact.tags contains_any [bl");
+    expect(opts.map((o) => o.label)).toEqual(['"blue"']);
+  });
+
+  it("a clause starting with a quote matches no stage", () => {
+    expect(buildModelOptions(ns, 'if "x')).toEqual([]);
+  });
+});
+
+describe("buildModelOptions — directive arg / stage edges", () => {
+  const dirs: DirectiveSpec[] = [
+    {
+      name: "verify_before",
+      hasBody: false,
+      arg: { kind: "scalar", type: "enum", values: ["payments", "calendar"] },
+    },
+  ];
+
+  it("scalar directive value filters by the typed fragment", () => {
+    const opts = buildModelOptions(ns, "verify_before: cal", dirs);
+    expect(opts.map((o) => o.label)).toEqual(["calendar"]);
+  });
+
+  it("a `name:` head that is not a directive falls through to other stages", () => {
+    // Not a directive → not the arg stage; nothing else matches → no options.
+    expect(buildModelOptions(ns, "notadirective: x", dirs)).toEqual([]);
+  });
+});
+
+describe("buildModelOptions — filter stage edges", () => {
+  it("inside a condition, the pipe stage only offers boolean/number filters", () => {
+    const ls = buildModelOptions(ns, "if contact.created | ").map(
+      (o) => o.label,
+    );
+    expect(ls.some((l) => l.includes("days_ago"))).toBe(true);
+    expect(ls.some((l) => l.includes("upper"))).toBe(false);
+  });
+
+  it("default-value stage filters enum options by the typed fragment", () => {
+    const opts = buildModelOptions(ns, "contact.priority | default: lo");
+    expect(opts.map((o) => o.label)).toEqual(['"low"']);
+  });
+});
+
+describe("buildModelOptions — final filter/hint branches", () => {
+  it("uses a directive's description as the arg hint when present", () => {
+    const dirs: DirectiveSpec[] = [
+      {
+        name: "verify_before",
+        hasBody: false,
+        description: "pick a category",
+        arg: { kind: "scalar", type: "enum", values: ["payments"] },
+      },
+    ];
+    const opts = buildModelOptions(ns, "verify_before: ", dirs);
+    expect(opts[0].hint).toBe("pick a category");
+  });
+
+  it("date-format stage filters presets by the typed fragment", () => {
+    const opts = buildModelOptions(ns, 'contact.created | date: "yyyy');
+    expect(opts.every((o) => o.label.toLowerCase().includes("yyyy"))).toBe(
+      true,
+    );
+    expect(opts.length).toBeGreaterThan(0);
+  });
+
+  it("pipe stage offers the date filter for a datetime field", () => {
+    const opts = buildModelOptions(ns, "contact.created | ");
+    const date = opts.find((o) => o.label === "| date");
+    expect(date?.insert).toBe("contact.created | date: ");
+  });
+
+  it("pipe stage offers the default filter for a string field", () => {
+    const opts = buildModelOptions(ns, "contact.first_name | ");
+    const def = opts.find((o) => o.label === "| default");
+    expect(def?.insert).toBe("contact.first_name | default: ");
+  });
+});
+
+describe("buildModelOptions — value-list edges", () => {
+  it("a list directive with no values yields nothing", () => {
+    const dirs: DirectiveSpec[] = [
+      { name: "assignTo", hasBody: false, arg: { kind: "list", type: "id" } },
+    ];
+    expect(buildModelOptions(ns, "assignTo: [", dirs)).toEqual([]);
+  });
+
+  it("boolean default filters true/false by the typed fragment", () => {
+    const opts = buildModelOptions(ns, "contact.vip | default: tr");
+    expect(opts.map((o) => o.label)).toEqual(["true"]);
   });
 });

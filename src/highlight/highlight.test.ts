@@ -66,3 +66,39 @@ describe("tokenizeExpression", () => {
     for (const k of all) expect(typeof HL_CLASS[k]).toBe("string");
   });
 });
+
+describe("tokenizeExpression — inline directives", () => {
+  const dirs = new Set(["verify_before", "identity"]);
+
+  it("colours a known directive head as a directive", () => {
+    const toks = tokenizeExpression("verify_before: payments", dirs);
+    expect(toks[0].kind).toBe("directive");
+    expect(HL_CLASS.directive).toContain("fuchsia");
+  });
+
+  it("leaves the arg after a directive coloured normally", () => {
+    const toks = tokenizeExpression(
+      "identity: contact.email == payments.email",
+      dirs,
+    );
+    expect(toks[0].kind).toBe("directive");
+    // contact.email is still a path; == an operator.
+    expect(toks.some((t) => t.kind === "path")).toBe(true);
+    expect(toks.some((t) => t.kind === "operator")).toBe(true);
+  });
+
+  it("without the directive set, the head is a plain path", () => {
+    expect(tokenizeExpression("verify_before: payments")[0].kind).toBe("path");
+  });
+
+  it("an unknown head is not treated as a directive", () => {
+    expect(tokenizeExpression("mystery: x", dirs)[0].kind).toBe("path");
+  });
+});
+
+describe("tokenizeExpression — logical || ", () => {
+  it("colours || as an operator", () => {
+    const toks = tokenizeExpression("a || b");
+    expect(toks.find((t) => t.kind === "operator")).toBeTruthy();
+  });
+});
