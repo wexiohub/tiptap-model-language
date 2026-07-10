@@ -1,6 +1,6 @@
 {
   "name": "tiptap-model-language",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A Tiptap extension for the model-language template syntax: raw-text {{…}} highlighting, staged type-aware autocomplete (variables, filters, control blocks), hover diagnostics and local validation via the model-language engine.",
   "license": "MIT",
   "type": "module",

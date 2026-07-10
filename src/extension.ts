@@ -28,6 +28,7 @@ declare module "@tiptap/core" {
         schema?: FieldSchema;
         directives?: DirectiveSpec[];
         directiveArgLabel?: DirectiveArgLabel;
+        matchKeys?: Record<string, string[]>;
       }) => ReturnType;
     };
   }
@@ -53,6 +54,7 @@ export const ModelSyntax = Extension.create<
       schema: [],
       directives: [],
       directiveArgLabel: undefined,
+      matchKeys: undefined,
       skipValidation: false,
       debounceMs: 300,
       severities: ["error", "warning", "info"],
@@ -69,7 +71,7 @@ export const ModelSyntax = Extension.create<
   addCommands() {
     return {
       setModelData:
-        ({ namespaces, schema, directives, directiveArgLabel }) =>
+        ({ namespaces, schema, directives, directiveArgLabel, matchKeys }) =>
         ({ tr, dispatch, editor }) => {
           if (dispatch) {
             dispatch(
@@ -79,6 +81,7 @@ export const ModelSyntax = Extension.create<
                 directives: directives ?? this.options.directives,
                 directiveArgLabel:
                   directiveArgLabel ?? this.options.directiveArgLabel,
+                matchKeys: matchKeys ?? this.options.matchKeys,
               }),
             );
             runValidation(editor, this.options, this.storage);
@@ -113,6 +116,7 @@ export const ModelSyntax = Extension.create<
     );
     const initialDirectives = this.options.directives;
     const initialDirectiveArgLabel = this.options.directiveArgLabel;
+    const initialMatchKeys = this.options.matchKeys;
     // Flags shared between the main plugin (writer), the tooltip and the
     // autocomplete (readers).
     const ctx: PluginContext = {
@@ -134,6 +138,7 @@ export const ModelSyntax = Extension.create<
           schema: initialSchema,
           directives: initialDirectives,
           directiveArgLabel: initialDirectiveArgLabel,
+          matchKeys: initialMatchKeys,
           byPath: new Map(),
           byRange: [],
         }),

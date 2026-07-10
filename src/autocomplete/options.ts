@@ -322,6 +322,7 @@ function directiveArgOptions(
   frag: string,
   namespaces: MlNamespace[],
   argLabel?: DirectiveArgLabel,
+  matchKeys?: Record<string, string[]>,
 ): ModelTokenOption[] {
   const arg = spec.arg;
   if (!arg) return [];
@@ -343,6 +344,29 @@ function directiveArgOptions(
     if (rhs) {
       if (!asField) return [];
       const [, lhs, cmp, rfrag] = rhs;
+      // The right operand is a match key `<category>.<key>` (e.g. payments.email)
+      // from `matchKeys`, NOT a schema field. Fall back to field paths only when
+      // no matchKeys were supplied (backward compatible).
+      const entries = Object.entries(matchKeys ?? {});
+      if (entries.length) {
+        const q = rfrag.toLowerCase();
+        const out: ModelTokenOption[] = [];
+        for (const [category, keys] of entries) {
+          for (const mkKey of keys) {
+            const path = `${category}.${mkKey}`;
+            if (q && !path.toLowerCase().startsWith(q)) continue;
+            out.push({
+              insert: `${spec.name}: ${lhs} ${cmp} ${path}`,
+              label: path,
+              hint: `${category} match key`,
+              group: "Directive arg",
+              kind: "path" as const,
+              close: true,
+            });
+          }
+        }
+        return out;
+      }
       return fieldMatches(namespaces, rfrag).map(({ path, f }) => ({
         insert: `${spec.name}: ${lhs} ${cmp} ${path}`,
         label: path,
@@ -435,6 +459,7 @@ export function buildModelOptions(
   query: string,
   directives: DirectiveSpec[] = [],
   directiveArgLabel?: DirectiveArgLabel,
+  matchKeys?: Record<string, string[]>,
 ): ModelTokenOption[] {
   // 1. Filter / date-format stage (after a pipe).
   const pipe = query.lastIndexOf("|");
@@ -557,6 +582,7 @@ export function buildModelOptions(
         dirArg[2],
         namespaces,
         directiveArgLabel,
+        matchKeys,
       );
   }
 

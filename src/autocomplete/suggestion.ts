@@ -76,6 +76,7 @@ export function createSuggestionPlugin(deps: {
           query,
           st?.directives ?? [],
           st?.directiveArgLabel,
+          st?.matchKeys,
         ),
       );
     },

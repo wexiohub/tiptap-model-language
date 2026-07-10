@@ -256,7 +256,7 @@ describe("buildModelOptions — inline directives", () => {
     expect(f?.kind).toBe("path");
   });
 
-  it("comparison directive completes the RIGHT operand and closes", () => {
+  it("comparison RIGHT operand falls back to fields without match keys", () => {
     const opts = buildModelOptions(
       ns,
       "identity: contact.age == contact.fi",
@@ -265,6 +265,37 @@ describe("buildModelOptions — inline directives", () => {
     const f = opts.find((o) => o.label === "contact.first_name");
     expect(f?.insert).toBe("identity: contact.age == contact.first_name");
     expect(f?.close).toBe(true);
+  });
+
+  it("comparison RIGHT operand suggests match keys (category.key) when provided", () => {
+    const opts = buildModelOptions(
+      ns,
+      "identity: contact.email == ",
+      directives,
+      undefined,
+      { payments: ["email", "customerId"], calendar: ["attendeeEmail"] },
+    );
+    const labels = opts.map((o) => o.label);
+    expect(labels).toContain("payments.email");
+    expect(labels).toContain("payments.customerId");
+    expect(labels).toContain("calendar.attendeeEmail");
+    const email = opts.find((o) => o.label === "payments.email");
+    expect(email?.insert).toBe("identity: contact.email == payments.email");
+    expect(email?.close).toBe(true);
+  });
+
+  it("comparison RIGHT operand filters match keys by prefix", () => {
+    const opts = buildModelOptions(
+      ns,
+      "identity: contact.email == pay",
+      directives,
+      undefined,
+      { payments: ["email", "customerId"], calendar: ["attendeeEmail"] },
+    );
+    expect(opts.map((o) => o.label)).toEqual([
+      "payments.email",
+      "payments.customerId",
+    ]);
   });
 
   it("an id-list directive suggests its values (operator ids)", () => {

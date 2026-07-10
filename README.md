@@ -103,6 +103,7 @@ are usually needed.
 | `schema` | `FieldSchema` | `[]` | Flattened field schema for local validation. Static case. |
 | `directives` | `DirectiveSpec[]` | `[]` | Inline-directive vocabulary (see below). Static case. |
 | `directiveArgLabel` | `(name, value) => string \| undefined` | `undefined` | Friendly label for a directive arg value (e.g. operator id → name). |
+| `matchKeys` | `Record<string, string[]>` | `undefined` | Right-operand suggestions for a comparison directive (`{{identity: contact.x == <category>.<key>}}`), keyed by category. See below. |
 | `skipValidation` | `boolean` | `false` | Turn off the `validate()` pass. Structural squiggles still render. |
 | `debounceMs` | `number` | `300` | Debounce for the validation pass. |
 | `severities` | `DiagnosticSeverity[]` | all | Which severities render inline. |
@@ -145,10 +146,30 @@ ModelSyntax.configure({
 ```
 
 Directives are highlighted distinctly, autocompleted (name, then an arg stage
-that lists enum values, builds `[a, b]` lists, or completes comparison operands
-with field paths), and validated against the specs. New diagnostic codes:
+that lists enum values, builds `[a, b]` lists, or completes comparison operands),
+and validated against the specs. New diagnostic codes:
 `ML240` unknown-directive, `ML241` missing-required-argument, `ML242`
 argument-type-mismatch, `ML243` value-not-in-`values`, `ML244` unexpected-argument.
+
+### Comparison right operand — `matchKeys`
+
+For a comparison directive like `identity`, the **left** operand completes with
+field paths, but the **right** operand is a `<category>.<key>` match key
+(`payments.email`, `payments.customerId`, …), not a schema field. Supply those
+per category via `matchKeys`:
+
+```ts
+ModelSyntax.configure({
+  namespaces,
+  schema,
+  directives,
+  // Right operand of `{{identity: contact.x == …}}` autocompletes from these.
+  matchKeys: { payments: ["email", "customerId"], calendar: ["attendeeEmail"] },
+});
+// → `{{identity: contact.email == payments.email}}`
+```
+
+Without `matchKeys`, the right operand falls back to field paths (unchanged).
 
 ## The engine, re-exported
 

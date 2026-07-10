@@ -71,6 +71,12 @@ export interface ModelSyntaxOptions {
    *  the autocomplete label and a hover title on the value. Return undefined to
    *  show the raw value. Static case only — push via `setModelData` for async. */
   directiveArgLabel?: DirectiveArgLabel;
+  /** Match keys for a comparison directive's RIGHT operand, keyed by integration
+   *  category (`{ payments: ["email", "customerId"], … }`). The right side of
+   *  `{{identity: contact.x == <category>.<key>}}` autocompletes from these
+   *  (`payments.email`, …) instead of the field schema. Static case only — push
+   *  via `setModelData` for async. Empty ⇒ RHS falls back to field paths. */
+  matchKeys?: Record<string, string[]>;
   /** Disable the local `validate()` pass entirely (structural squiggles stay). */
   skipValidation: boolean;
   /** Debounce for the validation pass, ms. */
@@ -108,6 +114,8 @@ export interface ModelSyntaxState {
   directives: DirectiveSpec[];
   /** Optional id→label resolver for directive arg values (hover + autocomplete). */
   directiveArgLabel?: DirectiveArgLabel;
+  /** Category→keys for a comparison directive's RIGHT operand autocomplete. */
+  matchKeys?: Record<string, string[]>;
   byPath: Map<string, TokenDiagnostic>;
   /** Range-anchored diagnostics (directives) — no field path to key on. */
   byRange: RangeDiagnostic[];

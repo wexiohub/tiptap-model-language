@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.1]
+
+- **`matchKeys` option** — the RIGHT operand of a comparison directive
+  (`{{identity: contact.x == <category>.<key>}}`) now autocompletes from a
+  data-driven `matchKeys` map (`{ payments: ["email", "customerId"], … }`),
+  suggesting `payments.email`, `payments.customerId`, … instead of schema field
+  paths. Pass it via the `matchKeys` option or the `setModelData` command.
+  Without it, the right operand falls back to field paths (unchanged behavior).
+
 ## [1.1.0]
 
 Inline directives (requires `model-language@^1.1`).
