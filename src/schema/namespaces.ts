@@ -8,7 +8,8 @@ export type MlFieldType =
   | "datetime"
   | "boolean"
   | "enum"
-  | "array";
+  | "array"
+  | "object";
 
 export interface MlField {
   key: string;
@@ -17,6 +18,13 @@ export interface MlField {
   label: string;
   /** Allowed values for enum fields (used only for hints). */
   values?: string[];
+  /**
+   * What is inside: the element's fields for an `array`, its own fields for
+   * an `object`. Recursive, so an array of objects holding another array is
+   * expressible - which is the shape a `for` loop over a loop variable needs
+   * (`{{for v in product.variants}}{{v.color}}`).
+   */
+  schema?: MlField[];
 }
 
 export interface MlNamespace {

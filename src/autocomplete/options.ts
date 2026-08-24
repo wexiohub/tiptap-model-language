@@ -9,6 +9,14 @@ import {
   type MlFilter,
   type MlNamespace,
 } from "../schema/namespaces";
+import {
+  LOOP_META_FIELDS,
+  LOOP_META_NAMESPACE,
+  fieldAt,
+  loopVarFields,
+  resolveLoopPath,
+  type LoopBinding,
+} from "./loops";
 
 export interface ModelTokenOption {
   /** Inner token text to insert (no braces). */
@@ -83,6 +91,7 @@ function timezoneOptions(frag: string): string[] {
 function resolveType(
   namespaces: MlNamespace[],
   expr: string,
+  loops: readonly LoopBinding[] = [],
 ): MlFieldType | "any" {
   const parts = expr
     .split("|")
@@ -90,7 +99,7 @@ function resolveType(
     .filter(Boolean);
   if (!parts.length) return "any";
   let type: MlFieldType | "any" = "any";
-  const f = findField(namespaces, parts[0]);
+  const f = findField(namespaces, parts[0], loops);
   if (f) type = f.type;
   for (let i = 1; i < parts.length; i++) {
     const meta = ML_FILTERS.find(
@@ -110,20 +119,47 @@ function filterApplies(f: MlFilter, type: MlFieldType | "any"): boolean {
 function findField(
   namespaces: MlNamespace[],
   path: string,
+  loops: readonly LoopBinding[] = [],
 ): MlField | undefined {
-  const dot = path.indexOf(".");
-  if (dot < 0) return undefined;
-  const ns = namespaces.find((n) => n.key === path.slice(0, dot));
-  return ns?.fields.find((f) => f.key === path.slice(dot + 1));
+  // `loop.index` and friends exist only inside a loop body.
+  if (loops.length && path.startsWith(`${LOOP_META_NAMESPACE}.`))
+    return LOOP_META_FIELDS.find(
+      (f) => f.key === path.slice(LOOP_META_NAMESPACE.length + 1),
+    );
+  return fieldAt(namespaces, resolveLoopPath(loops, path));
 }
 
-/** All fields (across namespaces, incl. dynamic flow) matching a fragment. */
+/**
+ * All fields matching a fragment: every namespace (incl. dynamic flow), plus
+ * whatever the loops around the cursor put in scope - the loop variable's own
+ * fields and the `loop.*` metadata. Those come first, because inside a loop
+ * body they are what the person is reaching for.
+ */
 function fieldMatches(
   namespaces: MlNamespace[],
   frag: string,
+  loops: readonly LoopBinding[] = [],
 ): { path: string; f: MlField }[] {
   const out: { path: string; f: MlField }[] = [];
   const q = frag.toLowerCase();
+  const scoped = loops.length
+    ? [
+        ...loopVarFields(namespaces, loops),
+        ...LOOP_META_FIELDS.map((f) => ({
+          path: `${LOOP_META_NAMESPACE}.${f.key}`,
+          f,
+        })),
+      ]
+    : [];
+  for (const entry of scoped) {
+    if (
+      q &&
+      !entry.path.toLowerCase().includes(q) &&
+      !entry.f.label.toLowerCase().includes(q)
+    )
+      continue;
+    out.push(entry);
+  }
   for (const ns of namespaces) {
     for (const f of ns.fields) {
       const path = `${ns.key}.${f.key}`;
@@ -323,6 +359,7 @@ function directiveArgOptions(
   namespaces: MlNamespace[],
   argLabel?: DirectiveArgLabel,
   matchKeys?: Record<string, string[]>,
+  loops: readonly LoopBinding[] = [],
 ): ModelTokenOption[] {
   const arg = spec.arg;
   if (!arg) return [];
@@ -367,7 +404,7 @@ function directiveArgOptions(
         }
         return out;
       }
-      return fieldMatches(namespaces, rfrag).map(({ path, f }) => ({
+      return fieldMatches(namespaces, rfrag, loops).map(({ path, f }) => ({
         insert: `${spec.name}: ${lhs} ${cmp} ${path}`,
         label: path,
         hint: `${f.label} · ${f.type}`,
@@ -379,7 +416,7 @@ function directiveArgOptions(
     // Left operand: complete the field, then step to the operator.
     const left = frag.match(/^([\w.]*)$/);
     if (!left) return [];
-    return fieldMatches(namespaces, left[1]).map(({ path, f }) => ({
+    return fieldMatches(namespaces, left[1], loops).map(({ path, f }) => ({
       insert: `${spec.name}: ${path} ${op} `,
       label: path,
       hint: `${f.label} · ${f.type}`,
@@ -460,6 +497,8 @@ export function buildModelOptions(
   directives: DirectiveSpec[] = [],
   directiveArgLabel?: DirectiveArgLabel,
   matchKeys?: Record<string, string[]>,
+  /** The `for` loops open around the cursor, outermost first. */
+  loops: readonly LoopBinding[] = [],
 ): ModelTokenOption[] {
   // 1. Filter / date-format stage (after a pipe).
   const pipe = query.lastIndexOf("|");
@@ -506,8 +545,8 @@ export function buildModelOptions(
     // boolean true/false, a number, or free text.
     const defArg = seg.match(/^\s*default\s*:\s*(.*)$/i);
     if (defArg) {
-      const field = findField(namespaces, left.split("|")[0].trim());
-      const dtype = resolveType(namespaces, left);
+      const field = findField(namespaces, left.split("|")[0].trim(), loops);
+      const dtype = resolveType(namespaces, left, loops);
       const frag = defArg[1].trim().replace(/^"|"$/g, "").toLowerCase();
       const mk = (val: string, label: string): ModelTokenOption => ({
         insert: `${left} | default: ${val}`,
@@ -530,7 +569,7 @@ export function buildModelOptions(
     }
 
     const fq = seg.trim().toLowerCase();
-    const type = resolveType(namespaces, left);
+    const type = resolveType(namespaces, left, loops);
     // In a condition, filters are transforms-before-compare — only keep the ones
     // that yield a comparable value (boolean / number), not display filters like
     // `replace` / `upper` (those belong in interpolation).
@@ -583,6 +622,7 @@ export function buildModelOptions(
         namespaces,
         directiveArgLabel,
         matchKeys,
+        loops,
       );
   }
 
@@ -647,7 +687,7 @@ export function buildModelOptions(
       /^([\w.]+)\s+(in|contains_any|contains_all)\s+\[([^\]]*)$/,
     );
     if (am) {
-      const f = findField(namespaces, am[1]);
+      const f = findField(namespaces, am[1], loops);
       if (!f?.values?.length) return [];
       const body = am[3];
       const picked = [...body.matchAll(/"([^"]*)"/g)].map((x) => x[1]);
@@ -684,7 +724,7 @@ export function buildModelOptions(
     // 2c. Value stage (enum) — `<path> <op> <frag>`.
     const vm = clause.match(/^([\w.]+)\s+(==|!=|contains)\s+"?([^"]*)$/);
     if (vm) {
-      const f = findField(namespaces, vm[1]);
+      const f = findField(namespaces, vm[1], loops);
       if (f?.values?.length) {
         const vq = vm[3].toLowerCase();
         return f.values
@@ -704,7 +744,7 @@ export function buildModelOptions(
     // 2b. Operator stage — `<complete path> <opFrag>`.
     const om = clause.match(/^([\w.]+)\s+([^\s]*)$/);
     if (om) {
-      const f = findField(namespaces, om[1]);
+      const f = findField(namespaces, om[1], loops);
       if (!f) return [];
       const of = om[2].toLowerCase();
       // Match the fragment against the operator LABEL only — `o.insert` carries
@@ -718,7 +758,7 @@ export function buildModelOptions(
     // 2a. Path stage — typing the field.
     const pm = clause.match(/^([\w.]*)$/);
     if (pm) {
-      return fieldMatches(namespaces, pm[1]).map(({ path, f }) => ({
+      return fieldMatches(namespaces, pm[1], loops).map(({ path, f }) => ({
         insert: `${lead}${path} `,
         label: path,
         hint: `${f.label} · ${f.type}`,
@@ -733,7 +773,7 @@ export function buildModelOptions(
   // 3. For-loop target — `for x in <frag>`.
   const fm = query.match(/^for\s+\w+\s+in\s+([\w.]*)$/i);
   if (fm) {
-    return fieldMatches(namespaces, fm[1]).map(({ path, f }) => ({
+    return fieldMatches(namespaces, fm[1], loops).map(({ path, f }) => ({
       insert: `for item in ${path}`,
       label: path,
       hint: `${f.label} · ${f.type}`,
@@ -747,7 +787,7 @@ export function buildModelOptions(
   // (the tree continues instead of closing immediately).
   const bv = query.match(/^([\w.]+)\s+$/);
   if (bv) {
-    const f = findField(namespaces, bv[1]);
+    const f = findField(namespaces, bv[1], loops);
     if (f) {
       const out: ModelTokenOption[] = [
         {
@@ -801,7 +841,7 @@ export function buildModelOptions(
       close: false,
     });
   }
-  for (const { path, f } of fieldMatches(namespaces, query.trim())) {
+  for (const { path, f } of fieldMatches(namespaces, query.trim(), loops)) {
     opts.push({
       insert: `${path} `,
       label: path,

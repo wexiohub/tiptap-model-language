@@ -83,6 +83,10 @@ editor.commands.setModelData({ namespaces, schema });
 - **Staged autocomplete** triggered by `{{`: field, then operator, then value.
   Enums list their options, array operators build a `["a", "b"]` list, dates
   offer format presets with a live preview, timezones come from a dropdown.
+- **Loop-aware autocomplete**: inside `{{for p in order.products}}`, `p.`
+  completes the element's own fields and `loop.index / count / first / last`
+  are offered - both only within the loop body. See
+  [Loops over arrays of objects](#loops-over-arrays-of-objects).
 - **Local validation** on every keystroke via the `model-language` `validate()`
   engine: unknown fields, missing defaults, unbalanced blocks, mistyped
   operators. Zero round-trips.
@@ -99,7 +103,7 @@ are usually needed.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `namespaces` | `MlNamespace[]` | `[]` | Autocomplete + highlighting groups. Static case; push via `setModelData` for async data. |
+| `namespaces` | `MlNamespace[]` | `[]` | Autocomplete + highlighting groups. An `array`/`object` field carries its own fields in `schema` (recursive) - that is what makes a loop variable complete. Static case; push via `setModelData` for async data. |
 | `schema` | `FieldSchema` | `[]` | Flattened field schema for local validation. Static case. |
 | `directives` | `DirectiveSpec[]` | `[]` | Inline-directive vocabulary (see below). Static case. |
 | `directiveArgLabel` | `(name, value) => string \| undefined` | `undefined` | Friendly label for a directive arg value (e.g. operator id → name). |
@@ -112,6 +116,58 @@ are usually needed.
 | `onResult` | `(result) => void` | `undefined` | Full result hook (diagnostics + token estimate). |
 
 Full reference: [ml.wexio.io/docs](https://ml.wexio.io/docs).
+
+## Loops over arrays of objects
+
+A field that holds a list of objects declares what is inside it, so the editor
+can complete a loop variable. `schema` is recursive, so an array inside an
+element works the same way:
+
+```ts
+const namespaces: MlNamespace[] = [
+  {
+    key: "order",
+    label: "Order",
+    fields: [
+      { key: "currency", type: "string", label: "Currency" },
+      {
+        key: "products",
+        type: "array",
+        label: "Products",
+        schema: [
+          { key: "name", type: "string", label: "Name" },
+          { key: "lineTotal", type: "number", label: "Line total" },
+          {
+            key: "variants",
+            type: "array",
+            label: "Variants",
+            schema: [{ key: "color", type: "string", label: "Colour" }],
+          },
+        ],
+      },
+    ],
+  },
+];
+```
+
+With that in place:
+
+```
+{{for p in order.products}}
+{{loop.index}}. {{p.name}} = {{p.lineTotal}} {{order.currency}}{{for v in p.variants}} · {{v.color}}{{/for}}
+{{/for}}
+```
+
+- `p.` offers `name`, `lineTotal`, `variants` - the element's fields.
+- `v.` offers `color`, resolved through the outer loop.
+- `loop.index`, `loop.count`, `loop.first`, `loop.last` are offered inside any
+  loop body, and nowhere else.
+- Types survive the hop: `{{if p.lineTotal ` offers numeric operators, because
+  the loop variable resolves to a `number` field.
+
+Nothing is required of the host beyond `schema` on the array field. The
+enclosing loops are read from the document itself, so a variable stops
+completing after its `{{/for}}`.
 
 ## Inline directives
 

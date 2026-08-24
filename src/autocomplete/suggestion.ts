@@ -10,7 +10,11 @@ import {
   capOptions,
   type ModelTokenOption,
 } from "./options";
+import { openLoopsAt } from "./loops";
 import { ModelTokenList, type ModelTokenListRef } from "./token-list";
+
+/** How far back to look for the `{{for}}` the cursor might be inside. */
+const LOOP_SCAN_CHARS = 4000;
 
 /**
  * The `{{` autocomplete plugin — staged, raw-text completions (no chips). Reads
@@ -70,6 +74,16 @@ export function createSuggestionPlugin(deps: {
 
     items: ({ query }) => {
       const st = key.getState(editor.state);
+      // What `for` loops the cursor sits inside, so a loop variable completes
+      // its own fields. Only the text just before the cursor is read: a loop
+      // header further back than this is not one a person is writing inside.
+      const from = editor.state.selection.from;
+      const before = editor.state.doc.textBetween(
+        Math.max(0, from - LOOP_SCAN_CHARS),
+        from,
+        "\n",
+        "\0",
+      );
       return capOptions(
         buildModelOptions(
           st?.namespaces ?? [],
@@ -77,6 +91,7 @@ export function createSuggestionPlugin(deps: {
           st?.directives ?? [],
           st?.directiveArgLabel,
           st?.matchKeys,
+          openLoopsAt(before),
         ),
       );
     },
