@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MlNamespace } from "../schema/namespaces";
-import { buildModelOptions } from "./options";
 import { fieldAt, loopVarFields, openLoopsAt, resolveLoopPath } from "./loops";
+import { buildModelOptions } from "./options";
 
 const ns: MlNamespace[] = [
   {
@@ -150,7 +150,9 @@ describe("fieldAt", () => {
         ],
       },
     ];
-    expect(fieldAt(overlapping, "flow.order.products.name")?.label).toBe("Name");
+    expect(fieldAt(overlapping, "flow.order.products.name")?.label).toBe(
+      "Name",
+    );
   });
 
   it("returns nothing for an unknown namespace or a bare name", () => {

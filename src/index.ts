@@ -31,10 +31,6 @@ export {
   validate,
 } from "model-language";
 export {
-  buildModelOptions,
-  type ModelTokenOption,
-} from "./autocomplete/options";
-export {
   fieldAt,
   LOOP_META_FIELDS,
   LOOP_META_NAMESPACE,
@@ -43,6 +39,10 @@ export {
   openLoopsAt,
   resolveLoopPath,
 } from "./autocomplete/loops";
+export {
+  buildModelOptions,
+  type ModelTokenOption,
+} from "./autocomplete/options";
 export {
   DEFAULT_LABELS,
   type DiagnosticSeverity,

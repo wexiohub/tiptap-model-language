@@ -10,12 +10,12 @@ import {
   type MlNamespace,
 } from "../schema/namespaces";
 import {
+  fieldAt,
   LOOP_META_FIELDS,
   LOOP_META_NAMESPACE,
-  fieldAt,
+  type LoopBinding,
   loopVarFields,
   resolveLoopPath,
-  type LoopBinding,
 } from "./loops";
 
 export interface ModelTokenOption {

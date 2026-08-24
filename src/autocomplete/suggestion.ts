@@ -5,12 +5,12 @@ import { Suggestion } from "@tiptap/suggestion";
 import tippy, { type Instance } from "tippy.js";
 import { key } from "../core/plugin-key";
 import type { ModelLanguageLabels, PluginContext } from "../core/types";
+import { openLoopsAt } from "./loops";
 import {
   buildModelOptions,
   capOptions,
   type ModelTokenOption,
 } from "./options";
-import { openLoopsAt } from "./loops";
 import { ModelTokenList, type ModelTokenListRef } from "./token-list";
 
 /** How far back to look for the `{{for}}` the cursor might be inside. */
